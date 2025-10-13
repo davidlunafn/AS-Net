@@ -112,7 +112,7 @@ La utilización de un conjunto de datos sintético es una piedra angular de esta
 
 #### 3.1.3. Creación de Mezclas y Estructura del Conjunto de Datos
 
-- **Procedimiento:** El proceso de creación de mezclas sintéticas seguirá un protocolo automatizado. Para cada muestra del conjunto de datos, se seleccionará aleatoriamente una vocalización limpia de carbonero común. A continuación, se generará un segmento de ruido rosa de la misma duración. Finalmente, la vocalización y el ruido se mezclarán aditivamente.
+- **Procedimiento:** El proceso de creación de mezclas sintéticas seguirá un protocolo automatizado. Cada muestra de audio sintético tendrá una duración de 20 segundos. Dentro de cada muestra de 20 segundos, se insertarán aleatoriamente entre 1 y 5 vocalizaciones limpias de carbonero común en posiciones aleatorias. A continuación, se generará un segmento de ruido rosa de 20 segundos. Finalmente, las vocalizaciones y el ruido se mezclarán aditivamente.
 - **Control de la Relación Señal-Ruido (SNR):** Un aspecto crucial del diseño experimental es la capacidad de evaluar la robustez del modelo en diferentes condiciones de ruido. Para ello, las mezclas se generarán en un rango controlado de relaciones señal-ruido (SNR). Específicamente, se crearán subconjuntos de datos para los siguientes niveles de SNR: **\-5 dB** (señal muy enmascarada por el ruido), **0 dB** (señal y ruido con igual potencia), **5 dB**, **10 dB** y **15 dB** (señal relativamente limpia). Este rango simula un espectro realista de condiciones de grabación, desde entornos muy ruidosos hasta condiciones casi ideales, lo que permitirá un análisis detallado del rendimiento del modelo en función del nivel de interferencia.<sup>14</sup>
 - **División del Conjunto de Datos:** El conjunto de datos completo, que consistirá en las mezclas sintéticas junto con sus componentes originales correspondientes (la biofonía limpia y el ruido rosa), se dividirá en tres subconjuntos mutuamente excluyentes: entrenamiento (80%), validación (10%) y prueba (10%). Se garantizará que las vocalizaciones de origen utilizadas para crear las mezclas en un subconjunto no aparezcan en los otros, para evitar cualquier fuga de datos y asegurar una evaluación imparcial de la capacidad de generalización del modelo.
 
@@ -134,17 +134,17 @@ Se propone una nueva arquitectura de red neuronal de extremo a extremo, denomina
 
 | Nivel de SNR (dB) | Nº de Vocalizaciones Únicas de _P. major_ | Nº de Mezclas de Entrenamiento | Nº de Mezclas de Validación | Nº de Mezclas de Prueba | Duración Total (horas) |
 | --- | --- | --- | --- | --- | --- |
-| **\-5** | 1,000 | 8,000 | 1,000 | 1,000 | ~15 |
+| **\-5** | 1,000 | 8,000 | 1,000 | 1,000 | ~55 |
 | --- | --- | --- | --- | --- | --- |
-| **0** | 1,000 | 8,000 | 1,000 | 1,000 | ~15 |
+| **0** | 1,000 | 8,000 | 1,000 | 1,000 | ~55 |
 | --- | --- | --- | --- | --- | --- |
-| **5** | 1,000 | 8,000 | 1,000 | 1,000 | ~15 |
+| **5** | 1,000 | 8,000 | 1,000 | 1,000 | ~55 |
 | --- | --- | --- | --- | --- | --- |
-| **10** | 1,000 | 8,000 | 1,000 | 1,000 | ~15 |
+| **10** | 1,000 | 8,000 | 1,000 | 1,000 | ~55 |
 | --- | --- | --- | --- | --- | --- |
-| **15** | 1,000 | 8,000 | 1,000 | 1,000 | ~15 |
+| **15** | 1,000 | 8,000 | 1,000 | 1,000 | ~55 |
 | --- | --- | --- | --- | --- | --- |
-| **Total** | 5,000 (únicas en total) | 40,000 | 5,000 | 5,000 | ~75 |
+| **Total** | 5,000 (únicas en total) | 40,000 | 5,000 | 5,000 | ~277 |
 | --- | --- | --- | --- | --- | --- |
 
 ## 4\. Un Protocolo de Evaluación de Doble Enfoque

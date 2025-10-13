@@ -24,7 +24,7 @@ Este documento describe el plan de implementación paso a paso para el proyecto 
         *   Implementar adaptadores conducidos (driven) en `src/as_net/adapters/driven` para leer los datos de audio de Xeno-Canto y Wytham Great Tit Song Dataset, y para guardar el conjunto de datos sintético en el directorio `data/processed`.
 
 3.  **Generar el conjunto de datos:**
-    *   Ejecutar el script de generación de datos para crear las mezclas de audio con diferentes niveles de SNR (-5, 0, 5, 10, 15 dB).
+    *   Ejecutar el script de generación de datos para crear las mezclas de audio de 20 segundos con diferentes niveles de SNR (-5, 0, 5, 10, 15 dB). Cada muestra de 20 segundos contendrá entre 1 y 5 vocalizaciones de aves limpias colocadas al azar.
     *   Dividir el conjunto de datos en conjuntos de entrenamiento, validación y prueba.
 
 ## Fase 2: Implementación del Modelo AS-Net
@@ -81,6 +81,48 @@ Este documento describe el plan de implementación paso a paso para el proyecto 
     *   Publicar el código fuente en un repositorio de GitHub.
     *   Publicar el conjunto de datos sintético y los modelos pre-entrenados.
     *   Escribir un artículo de investigación con los resultados del proyecto.
+
+## Explicación del Ruido Rosa, Mezcla y Aleatoriedad
+
+### Ruido Rosa
+
+El ruido rosa es un tipo de señal de ruido que tiene una densidad espectral de potencia que es inversamente proporcional a la frecuencia. Esto significa que tiene la misma potencia en todas las octavas. En otras palabras, la potencia del ruido rosa disminuye a medida que aumenta la frecuencia. Esto lo diferencia del ruido blanco, que tiene una densidad espectral de potencia plana en todas las frecuencias.
+
+En este proyecto, se utiliza ruido rosa para simular el ruido de fondo combinado de fuentes geofónicas (como el viento) y antropofónicas (como el tráfico distante). El ruido rosa es un sustituto más naturalista y perceptualmente más uniforme para muchos tipos de ruido ambiental que el ruido blanco.
+
+El ruido rosa se genera utilizando un algoritmo que filtra el ruido blanco. El filtro aplica una pendiente de -3 dB por octava al espectro de potencia del ruido blanco.
+
+### Mezcla de Señales
+
+La mezcla de señales es el proceso de combinar dos o más señales de audio en una sola señal. En este proyecto, se mezclan las señales de biofonía (vocalizaciones de aves) con el ruido rosa para crear el conjunto de datos sintético.
+
+La mezcla se realiza aditivamente, lo que significa que las muestras de las señales de audio se suman. Sin embargo, antes de la mezcla, se escala la señal de ruido para lograr una relación señal-ruido (SNR) específica.
+
+La SNR es una medida de la potencia de la señal en relación con la potencia del ruido. Se expresa en decibelios (dB). Una SNR alta significa que la señal es mucho más fuerte que el ruido, mientras que una SNR baja significa que la señal es más débil que el ruido.
+
+La fórmula para calcular el factor de escala para el ruido es la siguiente:
+
+```
+scaling_factor = sqrt(bioacoustic_power / (10^(snr / 10) * noise_power))
+```
+
+Donde:
+
+*   `bioacoustic_power` es la potencia media de la señal de biofonía.
+*   `noise_power` es la potencia media de la señal de ruido.
+*   `snr` es la relación señal-ruido deseada en dB.
+
+### Aleatoriedad
+
+La aleatoriedad juega un papel importante en la generación del conjunto de datos para garantizar que el modelo no aprenda patrones espurios.
+
+La aleatoriedad se introduce en los siguientes pasos:
+
+*   **Selección de archivos de audio:** Se selecciona aleatoriamente un archivo de audio de biofonía del conjunto de datos de origen para cada llamada.
+*   **Número de llamadas:** Se selecciona aleatoriamente un número de llamadas (entre 1 y 5) para agregar a cada muestra de 20 segundos.
+*   **Posición de las llamadas:** Se selecciona aleatoriamente una posición dentro de la muestra de 20 segundos para insertar cada llamada.
+
+Esta aleatoriedad ayuda a crear un conjunto de datos diverso y realista que es más probable que generalice a datos no vistos.
 
 ## Diagrama de la Metodología
 
