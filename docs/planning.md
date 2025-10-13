@@ -132,7 +132,7 @@ Se propone una nueva arquitectura de red neuronal de extremo a extremo, denomina
 
 **Tabla 2: Estructura del Conjunto de Datos de Paisajes Sonoros Sintéticos**
 
-| Nivel de SNR (dB) | Nº de Vocalizaciones Únicas de _P. major_ | Nº de Mezclas de Entrenamiento | Nº de Mezclas de Validación | Nº de Mezclas de Prueba | Duración Total (horas) |
+| Nivel de SNR (dB) | Nº de Aves Únicas | Nº de Mezclas de Entrenamiento | Nº de Mezclas de Validación | Nº de Mezclas de Prueba | Duración Total (horas) |
 | --- | --- | --- | --- | --- | --- |
 | **\-5** | 1,000 | 8,000 | 1,000 | 1,000 | ~55 |
 | --- | --- | --- | --- | --- | --- |

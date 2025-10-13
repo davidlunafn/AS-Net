@@ -5,6 +5,8 @@ import random
 from multiprocessing import Manager, Pool, Process
 from typing import List
 
+from pathlib import Path
+
 import librosa
 import numpy as np
 import soundfile as sf
@@ -27,14 +29,25 @@ class DataGenerationService:
     ):
         """Generates the dataset."""
 
-        # Create the output directory if it doesn't exist
-        os.makedirs(output_path, exist_ok=True)
+        logger.info("Starting data generation...")
+
+        # Create a dictionary of unique vocalizations and their file paths
+        logger.info("Creating a dictionary of unique vocalizations and their file paths...")
+        vocalizations = {}
+        for p in Path(os.path.join(RAW_DATA_PATH, "WAV")).rglob("*.[Ww][Aa][Vv]"):
+            if not p.name.startswith("._"):
+                vocalization_id = p.name.split("_")[0]
+                if vocalization_id not in vocalizations:
+                    vocalizations[vocalization_id] = []
+                vocalizations[vocalization_id].append(p)
+        logger.info(f"Found {len(vocalizations)} unique vocalizations.")
 
         # Create a manager and a queue
         with Manager() as manager:
             labels_queue = manager.Queue()
 
             # Create a writer process
+            logger.info("Starting writer process...")
             writer_process = Process(
                 target=self._write_labels,
                 args=(labels_queue, os.path.join(output_path, "labels.csv")),
@@ -42,11 +55,12 @@ class DataGenerationService:
             writer_process.start()
 
             # Create a pool of worker processes
+            logger.info("Starting worker processes...")
             with Pool() as pool:
                 pool.starmap(
                     self._generate_sample,
                     [
-                        (i, snr_levels, output_path, labels_queue)
+                        (i, snr_levels, output_path, labels_queue, vocalizations)
                         for i in range(num_samples)
                     ],
                 )
@@ -54,10 +68,15 @@ class DataGenerationService:
             # Terminate the writer process
             labels_queue.put(None)
             writer_process.join()
+            logger.info("Writer process finished.")
 
-    def _write_labels(self, queue: Manager().Queue, labels_file: str):
+        logger.info("Data generation finished.")
+
+    def _write_labels(self, queue, labels_file: str):
         """Writes the labels to the CSV file."""
+        logger.info("Writer process started.")
         with open(labels_file, "w", newline="") as f:
+            logger.info(f"Writing labels to {labels_file}")
             writer = csv.writer(f)
             writer.writerow(["sample_file", "start_time", "end_time", "lower_freq", "upper_freq", "json_file"])
             while True:
@@ -65,14 +84,13 @@ class DataGenerationService:
                 if item is None:
                     break
                 writer.writerow(item)
+        logger.info("Finished writing labels.")
 
     def _generate_sample(
-        self, sample_index: int, snr_levels: List[float], output_path: str, queue: Manager().Queue
+        self, sample_index: int, snr_levels: List[float], output_path: str, queue, vocalizations: dict
     ):
         """Generates a single sample."""
-
-        # Get the list of audio files
-        wav_files = librosa.util.find_files(os.path.join(RAW_DATA_PATH, "WAV"))
+        logger.info(f"Generating sample {sample_index + 1}...")
 
         # Create a 20-second audio sample
         sample_duration = 20
@@ -85,11 +103,14 @@ class DataGenerationService:
         # Add the calls to the sample
         calls = []
         for _ in range(num_calls):
-            # Select a random audio file
-            wav_file = random.choice(wav_files)
+            # Select a random unique vocalization
+            vocalization_id = random.choice(list(vocalizations.keys()))
+
+            # Get a random file for the selected vocalization
+            wav_file = random.choice(vocalizations[vocalization_id])
 
             # Read the audio file
-            audio, _ = librosa.load(wav_file, sr=sample_rate)
+            audio, _ = librosa.load(str(wav_file), sr=sample_rate)
 
             # Select a random position to insert the call
             start_position = random.randint(0, len(sample) - len(audio))
@@ -98,7 +119,7 @@ class DataGenerationService:
             sample[start_position : start_position + len(audio)] += audio
 
             # Get the call information from the JSON file
-            json_file = wav_file.replace(".wav", ".JSON").replace("WAV", "JSON")
+            json_file = str(wav_file).replace(".wav", ".JSON").replace("WAV", "JSON")
             with open(json_file, "r") as f:
                 json_data = json.load(f)
                 onsets = json_data["onsets"]
@@ -149,13 +170,28 @@ class DataGenerationService:
 
     def _generate_pink_noise(self, num_samples: int) -> np.ndarray:
         """Generates pink noise using the Voss-McCartney algorithm."""
+        # The number of octaves
         num_octaves = int(np.log2(num_samples))
+        # The number of rows for the white noise
+        num_rows = num_octaves + 1
+        # The white noise
+        white_noise = np.random.randn(num_rows, num_samples)
+        # The pink noise
         pink_noise = np.zeros(num_samples)
-        for i in range(num_octaves):
-            amplitude = 1 / (2 ** i)
-            frequency = 2 ** i
-            white_noise = np.random.randn(num_samples // frequency) * amplitude
-            pink_noise += np.repeat(white_noise, frequency)
+        # The amplitudes for each octave
+        amplitudes = 1 / (2 ** np.arange(num_rows))
+        # Sum the octaves
+        for i in range(num_rows):
+            # Get the white noise for this octave
+            octave_white_noise = white_noise[i]
+            # Resample the white noise to the correct length
+            resampled_white_noise = np.interp(
+                np.linspace(0, 1, num_samples),
+                np.linspace(0, 1, len(octave_white_noise)),
+                octave_white_noise,
+            )
+            # Add the resampled white noise to the pink noise
+            pink_noise += resampled_white_noise * amplitudes[i]
 
         # Normalize
         pink_noise /= np.sqrt(np.mean(pink_noise ** 2))
