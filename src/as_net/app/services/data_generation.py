@@ -154,16 +154,39 @@ class DataGenerationService:
                 snr=snr,
             )
 
-            # Save the mixed signal
+            # Save the signals
             output_dir = os.path.join(output_path, f"{snr}dB")
             os.makedirs(output_dir, exist_ok=True)
-            output_file = os.path.join(output_dir, f"sample_{sample_index}.wav")
-            sf.write(output_file, mixed_signal.audio.samples, mixed_signal.audio.sample_rate)
+
+            # Define file paths
+            mixed_output_file = os.path.join(output_dir, f"sample_{sample_index}_mixed.wav")
+            source_output_file = os.path.join(output_dir, f"sample_{sample_index}_source.wav")
+            noise_output_file = os.path.join(output_dir, f"sample_{sample_index}_noise.wav")
+
+            # Save the mixed signal
+            sf.write(mixed_output_file, mixed_signal.audio.samples, mixed_signal.audio.sample_rate)
+
+            # Save the clean bioacoustic source
+            sf.write(
+                source_output_file,
+                mixed_signal.bioacoustic_source.audio.samples,
+                mixed_signal.bioacoustic_source.audio.sample_rate,
+            )
+
+            # Save the noise
+            sf.write(noise_output_file, mixed_signal.noise.samples, mixed_signal.noise.sample_rate)
 
             # Put the labels in the queue
             for call in mixed_signal.bioacoustic_source.calls:
                 queue.put(
-                    [output_file, call.start_time, call.end_time, call.lower_freq, call.upper_freq, call.json_file]
+                    [
+                        mixed_output_file,
+                        call.start_time,
+                        call.end_time,
+                        call.lower_freq,
+                        call.upper_freq,
+                        call.json_file,
+                    ]
                 )
 
             logger.info(f"Generated sample {sample_index + 1} with SNR {snr}dB")
