@@ -45,11 +45,14 @@ class Decoder(nn.Module):
 class TCNBlock(nn.Module):
     """A single block of a Temporal Convolutional Network."""
 
-    def __init__(self, in_channels: int, out_channels: int, kernel_size: int, dilation: int, stride: int):
+    def __init__(
+        self, in_channels: int, out_channels: int, kernel_size: int, dilation: int, stride: int, dropout_rate: float
+    ):
         super().__init__()
         self.conv1 = nn.Conv1d(in_channels, out_channels, kernel_size=1)
         self.norm1 = nn.BatchNorm1d(out_channels)
         self.prelu1 = nn.PReLU()
+        self.dropout1 = nn.Dropout(dropout_rate)
         self.dconv = nn.Conv1d(
             out_channels,
             out_channels,
@@ -60,6 +63,7 @@ class TCNBlock(nn.Module):
         )
         self.norm2 = nn.BatchNorm1d(out_channels)
         self.prelu2 = nn.PReLU()
+        self.dropout2 = nn.Dropout(dropout_rate)
         self.conv2 = nn.Conv1d(out_channels, in_channels, kernel_size=1)
         self.residual_conv = nn.Conv1d(in_channels, in_channels, 1) if in_channels != out_channels else None
 
@@ -68,9 +72,11 @@ class TCNBlock(nn.Module):
         out = self.conv1(x)
         out = self.norm1(out)
         out = self.prelu1(out)
+        out = self.dropout1(out)
         out = self.dconv(out)
         out = self.norm2(out)
         out = self.prelu2(out)
+        out = self.dropout2(out)
         out = self.conv2(out)
         if self.residual_conv:
             residual = self.residual_conv(residual)
@@ -80,13 +86,20 @@ class TCNBlock(nn.Module):
 class SeparationModule(nn.Module):
     """The separation module of AS-Net, composed of a stack of TCN blocks."""
 
-    def __init__(self, in_channels: int, num_blocks: int, tcn_kernel_size: int):
+    def __init__(self, in_channels: int, num_blocks: int, tcn_kernel_size: int, dropout_rate: float):
         super().__init__()
         self.blocks = nn.ModuleList()
         for i in range(num_blocks):
             dilation = 2 ** i
             self.blocks.append(
-                TCNBlock(in_channels, in_channels, kernel_size=tcn_kernel_size, dilation=dilation, stride=1)
+                TCNBlock(
+                    in_channels,
+                    in_channels,
+                    kernel_size=tcn_kernel_size,
+                    dilation=dilation,
+                    stride=1,
+                    dropout_rate=dropout_rate,
+                )
             )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -105,7 +118,10 @@ class ASNet(nn.Module):
 
         # TODO: Make TCN kernel size configurable
         self.separation = SeparationModule(
-            config.encoder.out_channels, config.separation.num_blocks, tcn_kernel_size=3
+            config.encoder.out_channels,
+            config.separation.num_blocks,
+            tcn_kernel_size=3,
+            dropout_rate=config.separation.dropout_rate,
         )
 
         self.mask_estimation = nn.Conv1d(

@@ -1,3 +1,4 @@
+import itertools
 from typing import Any
 
 import torch
@@ -66,11 +67,13 @@ class TrainingService:
         self,
         model: Any,
         optimizer: Any,
+        scheduler: Any,
         num_epochs: int,
         device: str,
         config: ASNetConfig,
         accumulation_steps: int = 1,
         steps_per_epoch: int = None,
+        validation_steps: int = None,
     ):
         """Trains the model."""
 
@@ -79,6 +82,8 @@ class TrainingService:
             logger.info(f"Using gradient accumulation with {accumulation_steps} steps.")
         if steps_per_epoch is not None:
             logger.info(f"Running for {steps_per_epoch} steps per epoch.")
+        if validation_steps is not None:
+            logger.info(f"Running for {validation_steps} steps for validation.")
 
         train_loader = self.data_loader.load_train_data()
         val_loader = self.data_loader.load_val_data()
@@ -91,16 +96,10 @@ class TrainingService:
             train_loss = 0.0
             optimizer.zero_grad()
 
-            num_steps_to_run = steps_per_epoch if steps_per_epoch is not None else len(train_loader)
-            train_iterator = iter(train_loader)
-
-            with tqdm(range(num_steps_to_run), desc=f"Epoch {epoch + 1}/{num_epochs} [Train]") as pbar:
-                for i in pbar:
-                    try:
-                        batch = next(train_iterator)
-                    except StopIteration:
-                        logger.warning("DataLoader exhausted before reaching steps_per_epoch. Ending epoch early.")
-                        num_steps_to_run = i  # Adjust for correct average loss calculation
+            num_steps_run = 0
+            with tqdm(train_loader, desc=f"Epoch {epoch + 1}/{num_epochs} [Train]") as pbar:
+                for i, batch in enumerate(pbar):
+                    if steps_per_epoch is not None and i >= steps_per_epoch:
                         break
 
                     # Assuming batch is a tuple of (mixture, source1, source2)
@@ -121,16 +120,21 @@ class TrainingService:
                     loss = loss / accumulation_steps
                     loss.backward()
 
-                    # Update weights on accumulation step or last step of the epoch
-                    if (i + 1) % accumulation_steps == 0 or (i + 1) == num_steps_to_run:
+                    if (i + 1) % accumulation_steps == 0:
                         optimizer.step()
                         optimizer.zero_grad()
 
                     train_loss += loss.item() * accumulation_steps
                     pbar.set_postfix({"loss": loss.item() * accumulation_steps})
+                    num_steps_run += 1
 
-            if num_steps_to_run > 0:
-                avg_train_loss = train_loss / num_steps_to_run
+            # Step with any remaining gradients at the end of the epoch
+            if num_steps_run > 0 and num_steps_run % accumulation_steps != 0:
+                optimizer.step()
+                optimizer.zero_grad()
+
+            if num_steps_run > 0:
+                avg_train_loss = train_loss / num_steps_run
             else:
                 avg_train_loss = 0.0
             logger.info(f"Epoch {epoch + 1} - Training loss: {avg_train_loss:.4f}")
@@ -138,9 +142,13 @@ class TrainingService:
             # Validation loop
             model.eval()
             val_loss = 0.0
+            num_val_steps_run = 0
             with torch.no_grad():
                 with tqdm(val_loader, desc=f"Epoch {epoch + 1}/{num_epochs} [Val]") as pbar:
-                    for batch in pbar:
+                    for i, batch in enumerate(pbar):
+                        if validation_steps is not None and i >= validation_steps:
+                            break
+
                         mixture, source1, source2 = batch
                         mixture, source1, source2 = (
                             mixture.to(device),
@@ -156,12 +164,20 @@ class TrainingService:
 
                         val_loss += loss.item()
                         pbar.set_postfix({"loss": loss.item()})
+                        num_val_steps_run += 1
 
-            if len(val_loader) > 0:
-                avg_val_loss = val_loss / len(val_loader)
+            if num_val_steps_run > 0:
+                avg_val_loss = val_loss / num_val_steps_run
             else:
                 avg_val_loss = 0.0
             logger.info(f"Epoch {epoch + 1} - Validation loss: {avg_val_loss:.4f}")
+
+            # Step the scheduler
+            old_lr = optimizer.param_groups[0]["lr"]
+            scheduler.step(avg_val_loss)
+            new_lr = optimizer.param_groups[0]["lr"]
+            if old_lr != new_lr:
+                logger.info(f"Learning rate reduced from {old_lr} to {new_lr}")
 
             # Save checkpoint and history
             self.checkpoint_saver.save_checkpoint(model, optimizer, epoch, avg_val_loss, config)

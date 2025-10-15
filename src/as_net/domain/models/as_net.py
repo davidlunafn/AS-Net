@@ -36,6 +36,7 @@ class SeparationModuleConfig:
     """Configuration for the Separation Module."""
 
     num_blocks: int
+    dropout_rate: float = 0.0
     tcn_blocks: List[TCNBlockConfig] = field(default_factory=list)
 
 

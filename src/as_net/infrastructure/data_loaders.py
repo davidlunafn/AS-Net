@@ -1,5 +1,7 @@
 import os
 
+import numpy as np
+
 import pandas as pd
 import soundfile as sf
 import torch
@@ -13,19 +15,14 @@ from as_net.config import PROCESSED_DATA_PATH
 class AudioDataset(Dataset):
     """PyTorch Dataset for loading the audio data."""
 
-    def __init__(self, labels_file: str, data_path: str):
-        # The labels file is expected to be in the root of the data_path
-        labels_df = pd.read_csv(os.path.join(data_path, labels_file))
-        # Get unique file paths, as one file can have multiple call entries
-        self.unique_files = labels_df.iloc[:, 0].unique()
-        self.data_path = data_path
+    def __init__(self, files: list):
+        self.files = files
 
     def __len__(self) -> int:
-        return len(self.unique_files)
+        return len(self.files)
 
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        # Get the unique file path for this index
-        mixed_file_path = self.unique_files[idx]
+        mixed_file_path = self.files[idx]
 
         # Derive source and noise file paths
         source_file_path = mixed_file_path.replace("_mixed.wav", "_source.wav")
@@ -47,20 +44,43 @@ class AudioDataLoader(IDataLoader):
     """PyTorch implementation of the IDataLoader port."""
 
     def __init__(
-        self, data_path: str = PROCESSED_DATA_PATH, batch_size: int = 32, val_split: float = 0.2, num_workers: int = 4
+        self,
+        data_path: str = PROCESSED_DATA_PATH,
+        batch_size: int = 32,
+        val_split: float = 0.2,
+        num_workers: int = 4,
     ):
         self.data_path = data_path
         self.batch_size = batch_size
         self.num_workers = num_workers
 
-        dataset = AudioDataset(labels_file="labels.csv", data_path=self.data_path)
+        labels_df = pd.read_csv(os.path.join(self.data_path, "labels.csv"))
+        all_files = labels_df.iloc[:, 0].unique()
 
-        val_size = int(val_split * len(dataset))
-        train_size = len(dataset) - val_size
+        # Create a dictionary to group files by base sample index
+        samples = {}
+        for f in all_files:
+            base_name = "_".join(os.path.basename(f).split("_")[:2])  # e.g. sample_0
+            if base_name not in samples:
+                samples[base_name] = []
+            samples[base_name].append(f)
 
-        # For reproducibility, we can set a manual seed for the generator
-        generator = torch.Generator().manual_seed(42)
-        self.train_dataset, self.val_dataset = random_split(dataset, [train_size, val_size], generator=generator)
+        sample_keys = list(samples.keys())
+
+        # Shuffle and split the base samples for reproducibility
+        np.random.seed(42)
+        np.random.shuffle(sample_keys)
+
+        val_size = int(val_split * len(sample_keys))
+        train_keys = sample_keys[val_size:]
+        val_keys = sample_keys[:val_size]
+
+        # Create file lists for train and val
+        train_files = [f for key in train_keys for f in samples[key]]
+        val_files = [f for key in val_keys for f in samples[key]]
+
+        self.train_dataset = AudioDataset(files=train_files)
+        self.val_dataset = AudioDataset(files=val_files)
 
     def load_train_data(self) -> Any:
         return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers)

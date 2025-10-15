@@ -40,10 +40,10 @@ def train_model(args):
     # 1. Configuration
     # TODO: This should be loaded from a file (e.g., YAML)
     config = ASNetConfig(
-        encoder=EncoderConfig(kernel_size=16, stride=8, out_channels=256),
-        decoder=DecoderConfig(kernel_size=16, stride=8, in_channels=256),
+        encoder=EncoderConfig(kernel_size=16, stride=8, out_channels=128),
+        decoder=DecoderConfig(kernel_size=16, stride=8, in_channels=128),
         separation=SeparationModuleConfig(
-            num_blocks=8, tcn_blocks=[]
+            num_blocks=8, dropout_rate=args.dropout_rate, tcn_blocks=[]
         ),  # TCN blocks are created inside the model for now
     )
 
@@ -62,6 +62,9 @@ def train_model(args):
     # 3. Create Model and Optimizer
     model = model_creation_service.create_model(config=config)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-4)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, "min", patience=2, factor=0.5
+    )
 
     # 4. Start Training
     if torch.cuda.is_available():
@@ -74,11 +77,13 @@ def train_model(args):
     training_service.train(
         model=model,
         optimizer=optimizer,
+        scheduler=scheduler,
         num_epochs=args.num_epochs,
         device=device,
         config=config,
         accumulation_steps=args.accumulation_steps,
         steps_per_epoch=args.steps_per_epoch,
+        validation_steps=args.validation_steps,
     )
 
 
@@ -114,6 +119,13 @@ def main():
     )
     train_parser.add_argument(
         "--steps-per-epoch", type=int, default=None, help="Number of steps per epoch. Runs a full epoch if not set."
+    )
+    train_parser.add_argument("--dropout-rate", type=float, default=0.1, help="Dropout rate for regularization.")
+    train_parser.add_argument(
+        "--validation-steps",
+        type=int,
+        default=None,
+        help="Number of steps for validation. Runs on all data if not set.",
     )
     train_parser.set_defaults(func=train_model)
 
