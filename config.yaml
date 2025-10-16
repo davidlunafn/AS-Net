@@ -1,0 +1,23 @@
+encoder:
+  kernel_size: 16
+  stride: 8
+  out_channels: 128
+
+decoder:
+  kernel_size: 16
+  stride: 8
+  in_channels: 128
+
+separation:
+  num_blocks: 8
+  dropout_rate: 0.2
+
+training:
+  epochs: 50
+  batch_size: 1
+  learning_rate: 0.0001
+  accumulation_steps: 2
+  num_workers: 1
+  steps_per_epoch: 2000
+  validation_steps: 500
+

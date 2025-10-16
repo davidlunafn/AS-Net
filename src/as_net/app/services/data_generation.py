@@ -30,6 +30,7 @@ class DataGenerationService:
         """Generates the dataset."""
 
         logger.info("Starting data generation...")
+        os.makedirs(output_path, exist_ok=True)
 
         # Create a dictionary of unique vocalizations and their file paths
         logger.info("Creating a dictionary of unique vocalizations and their file paths...")

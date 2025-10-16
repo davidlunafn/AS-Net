@@ -3,10 +3,13 @@ import sys
 import os
 
 import torch
+import yaml
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "src"))
 
 from as_net.app.services.data_generation import DataGenerationService
+from as_net.app.services.evaluation import EvaluationService
+from as_net.app.services.plotting import PlottingService
 from as_net.domain.services.mixing import MixingService
 from as_net.app.services.model_creation import ModelCreationService
 from as_net.app.services.training import TrainingService
@@ -25,30 +28,49 @@ from as_net.logger import logger
 
 def generate_data(args):
     """Generates the dataset."""
-
-    # Create the services
     mixing_service = MixingService()
     data_generation_service = DataGenerationService(mixing_service)
-
-    # Generate the data
-    data_generation_service.generate(num_samples=args.num_samples, snr_levels=args.snr_levels)
+    data_generation_service.generate(
+        num_samples=args.num_samples, snr_levels=args.snr_levels, output_path=args.output_path
+    )
 
 
 def train_model(args):
     """Trains the model."""
+    with open(args.config, "r") as f:
+        config_dict = yaml.safe_load(f)
 
-    # 1. Configuration
-    # TODO: This should be loaded from a file (e.g., YAML)
-    config = ASNetConfig(
-        encoder=EncoderConfig(kernel_size=16, stride=8, out_channels=128),
-        decoder=DecoderConfig(kernel_size=16, stride=8, in_channels=128),
-        separation=SeparationModuleConfig(
-            num_blocks=8, dropout_rate=args.dropout_rate, tcn_blocks=[]
-        ),  # TCN blocks are created inside the model for now
+    train_config = config_dict.get("training", {})
+    num_epochs = args.num_epochs if args.num_epochs is not None else train_config.get("epochs", 100)
+    batch_size = args.batch_size if args.batch_size is not None else train_config.get("batch_size", 16)
+    learning_rate = args.lr if args.lr is not None else train_config.get("learning_rate", 1e-4)
+    num_workers = args.num_workers if args.num_workers is not None else train_config.get("num_workers", 4)
+    accumulation_steps = (
+        args.accumulation_steps
+        if args.accumulation_steps is not None
+        else train_config.get("accumulation_steps", 1)
+    )
+    steps_per_epoch = (
+        args.steps_per_epoch if args.steps_per_epoch is not None else train_config.get("steps_per_epoch")
+    )
+    validation_steps = (
+        args.validation_steps
+        if args.validation_steps is not None
+        else train_config.get("validation_steps")
     )
 
-    # 2. Instantiate Adapters and Services
-    data_loader = AudioDataLoader(batch_size=args.batch_size, num_workers=args.num_workers)
+    if args.dropout_rate is not None:
+        config_dict["separation"]["dropout_rate"] = args.dropout_rate
+
+    config = ASNetConfig(
+        encoder=EncoderConfig(**config_dict["encoder"]),
+        decoder=DecoderConfig(**config_dict["decoder"]),
+        separation=SeparationModuleConfig(
+            **config_dict["separation"], tcn_blocks=[]
+        ),
+    )
+
+    data_loader = AudioDataLoader(batch_size=batch_size, num_workers=num_workers)
     checkpoint_saver = CheckpointSaver()
     history_saver = HistorySaver()
     model_builder = ASNetTorchBuilder()
@@ -59,14 +81,10 @@ def train_model(args):
         history_saver=history_saver,
     )
 
-    # 3. Create Model and Optimizer
     model = model_creation_service.create_model(config=config)
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-4)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, "min", patience=2, factor=0.5
-    )
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=1e-4)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, "min", patience=2, factor=0.5)
 
-    # 4. Start Training
     if torch.cuda.is_available():
         device = "cuda"
     elif torch.backends.mps.is_available():
@@ -74,69 +92,132 @@ def train_model(args):
     else:
         device = "cpu"
     logger.info(f"Using device: {device.upper()}")
+
     training_service.train(
         model=model,
         optimizer=optimizer,
         scheduler=scheduler,
-        num_epochs=args.num_epochs,
+        num_epochs=num_epochs,
         device=device,
         config=config,
-        accumulation_steps=args.accumulation_steps,
-        steps_per_epoch=args.steps_per_epoch,
-        validation_steps=args.validation_steps,
+        accumulation_steps=accumulation_steps,
+        steps_per_epoch=steps_per_epoch,
+        validation_steps=validation_steps,
     )
 
 
 def evaluate_model(args):
     """Evaluates the model."""
-    # TODO: Implement the evaluation logic
-    print("Evaluating the model...")
+    logger.info(f"Loading checkpoint from {args.checkpoint}")
+
+    if torch.cuda.is_available():
+        device = "cuda"
+    elif torch.backends.mps.is_available():
+        device = "mps"
+    else:
+        device = "cpu"
+    logger.info(f"Using device: {device.upper()}")
+
+    checkpoint = torch.load(args.checkpoint, map_location=device, weights_only=False)
+    config = checkpoint["config"]
+
+    model_builder = ASNetTorchBuilder()
+    model = model_builder.build(config)
+    model.load_state_dict(checkpoint["model_state_dict"])
+    logger.info("Model loaded successfully.")
+
+    data_loader = AudioDataLoader(
+        data_path=args.data_path, batch_size=args.batch_size, num_workers=args.num_workers
+    )
+    evaluation_service = EvaluationService(data_loader=data_loader)
+    evaluation_service.evaluate(
+        model=model, device=device, output_path=args.output, save_audio_path=args.save_audio_path
+    )
+
+
+def plot_results(args):
+    """Plots various results."""
+    plotting_service = PlottingService()
+    if args.type == "all":
+        logger.info("Generating all summary plots...")
+        plotting_service.plot_learning_curves(args.history_file)
+        plotting_service.plot_sdr_improvement(args.results_file)
+        plotting_service.plot_evaluation_distribution(args.results_file)
+        logger.info("Finished generating all summary plots.")
+    elif args.type == "learning-curves":
+        plotting_service.plot_learning_curves(args.history_file)
+    elif args.type == "sdr-improvement":
+        plotting_service.plot_sdr_improvement(args.results_file)
+    elif args.type == "eval-distribution":
+        plotting_service.plot_evaluation_distribution(args.results_file)
+    elif args.type == "error-spectrogram":
+        plotting_service.plot_error_spectrogram(args.clean_file, args.separated_file)
 
 
 def main():
     """Main function for the AS-Net project."""
-
-    # Create the argument parser
     parser = argparse.ArgumentParser(description="AS-Net: A Deep Learning Framework for Bioacoustic Source Separation.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    # Create the parser for the "generate" command
+    # Generate command
     generate_parser = subparsers.add_parser("generate", help="Generate the dataset.")
     generate_parser.add_argument("--num-samples", type=int, default=100, help="Number of samples to generate.")
     generate_parser.add_argument("--snr-levels", type=int, nargs="+", default=[-5, 0, 5, 10, 15], help="SNR levels to use.")
+    generate_parser.add_argument("--output-path", type=str, default="data/processed", help="Path to save the generated data.")
     generate_parser.set_defaults(func=generate_data)
 
-    # Create the parser for the "train" command
+    # Train command
     train_parser = subparsers.add_parser("train", help="Train the model.")
-    train_parser.add_argument("--num-epochs", type=int, default=100, help="Number of epochs to train for.")
-    train_parser.add_argument("--batch-size", type=int, default=16, help="Batch size for training.")
-    train_parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate.")
-    train_parser.add_argument(
-        "--num-workers", type=int, default=4, help="Number of workers for the DataLoader."
-    )
-    train_parser.add_argument(
-        "--accumulation-steps", type=int, default=1, help="Number of steps for gradient accumulation."
-    )
-    train_parser.add_argument(
-        "--steps-per-epoch", type=int, default=None, help="Number of steps per epoch. Runs a full epoch if not set."
-    )
-    train_parser.add_argument("--dropout-rate", type=float, default=0.1, help="Dropout rate for regularization.")
-    train_parser.add_argument(
-        "--validation-steps",
-        type=int,
-        default=None,
-        help="Number of steps for validation. Runs on all data if not set.",
-    )
+    train_parser.add_argument("--num-epochs", type=int, default=None, help="Number of epochs to train for (overrides config).")
+    train_parser.add_argument("--batch-size", type=int, default=None, help="Batch size for training (overrides config).")
+    train_parser.add_argument("--lr", type=float, default=None, help="Learning rate (overrides config).")
+    train_parser.add_argument("--num-workers", type=int, default=None, help="Number of workers for the DataLoader (overrides config).")
+    train_parser.add_argument("--accumulation-steps", type=int, default=None, help="Number of steps for gradient accumulation (overrides config).")
+    train_parser.add_argument("--steps-per-epoch", type=int, default=None, help="Number of steps per epoch (overrides config).")
+    train_parser.add_argument("--config", type=str, default="config.yaml", help="Path to the model configuration file.")
+    train_parser.add_argument("--dropout-rate", type=float, default=None, help="Dropout rate for regularization (overrides config file).")
+    train_parser.add_argument("--validation-steps", type=int, default=None, help="Number of steps for validation (overrides config).")
     train_parser.set_defaults(func=train_model)
 
-    # Create the parser for the "evaluate" command
+    # Evaluate command
     evaluate_parser = subparsers.add_parser("evaluate", help="Evaluate the model.")
+    evaluate_parser.add_argument("--checkpoint", type=str, required=True, help="Path to the model checkpoint to evaluate.")
+    evaluate_parser.add_argument("--data-path", type=str, default="/Volumes/SSD DL/osfstorage-archive/data/test_data/", help="Path to the test data to evaluate.")
+    evaluate_parser.add_argument("--batch-size", type=int, default=16, help="Batch size for evaluation.")
+    evaluate_parser.add_argument("--num-workers", type=int, default=4, help="Number of workers for the DataLoader.")
+    evaluate_parser.add_argument("--output", type=str, default="models/evaluation_results.csv", help="Path to save the evaluation results CSV.")
+    evaluate_parser.add_argument("--save-audio-path", type=str, default="data/separated_audio/", help="Path to save separated audio files for analysis.")
     evaluate_parser.set_defaults(func=evaluate_model)
 
-    # Parse the arguments
-    args = parser.parse_args()
+    # Plot command
+    plot_parser = subparsers.add_parser("plot", help="Generate plots for the paper.")
+    plot_subparsers = plot_parser.add_subparsers(dest="type", required=True)
 
-    # Call the appropriate function
+    # 'all' subcommand
+    all_parser = plot_subparsers.add_parser("all", help="Generate all standard plots at once.")
+    all_parser.add_argument("--history-file", type=str, default="models/training_history.csv", help="Path to the training history CSV file.")
+    all_parser.add_argument("--results-file", type=str, default="models/evaluation_results.csv", help="Path to the evaluation results CSV file.")
+    all_parser.set_defaults(func=plot_results)
+
+    # Individual plot subcommands
+    lc_parser = plot_subparsers.add_parser("learning-curves", help="Plot training and validation learning curves.")
+    lc_parser.add_argument("--history-file", type=str, default="models/training_history.csv", help="Path to the training history CSV file.")
+    lc_parser.set_defaults(func=plot_results)
+
+    sdr_parser = plot_subparsers.add_parser("sdr-improvement", help="Plot SI-SDR improvement.")
+    sdr_parser.add_argument("--results-file", type=str, default="models/evaluation_results.csv", help="Path to the evaluation results CSV file.")
+    sdr_parser.set_defaults(func=plot_results)
+
+    ed_parser = plot_subparsers.add_parser("eval-distribution", help="Plot distribution of evaluation metrics.")
+    ed_parser.add_argument("--results-file", type=str, default="models/evaluation_results.csv", help="Path to the evaluation results CSV file.")
+    ed_parser.set_defaults(func=plot_results)
+
+    err_parser = plot_subparsers.add_parser("error-spectrogram", help="Plot the spectrogram of the residual error.")
+    err_parser.add_argument("--clean-file", type=str, required=True, help="Path to the original clean audio file.")
+    err_parser.add_argument("--separated-file", type=str, required=True, help="Path to the model-separated audio file.")
+    err_parser.set_defaults(func=plot_results)
+
+    args = parser.parse_args()
     args.func(args)
 
 

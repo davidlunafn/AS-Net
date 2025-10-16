@@ -14,3 +14,8 @@ class IDataLoader(ABC):
     def load_val_data(self) -> Any:
         """Loads the validation data."""
         raise NotImplementedError
+
+    @abstractmethod
+    def load_test_data(self) -> Any:
+        """Loads the test data."""
+        raise NotImplementedError

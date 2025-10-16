@@ -21,7 +21,7 @@ class AudioDataset(Dataset):
     def __len__(self) -> int:
         return len(self.files)
 
-    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, str]:
         mixed_file_path = self.files[idx]
 
         # Derive source and noise file paths
@@ -37,6 +37,7 @@ class AudioDataset(Dataset):
             torch.from_numpy(mixed_audio),
             torch.from_numpy(source_audio),
             torch.from_numpy(noise_audio),
+            mixed_file_path,
         )
 
 
@@ -47,7 +48,8 @@ class AudioDataLoader(IDataLoader):
         self,
         data_path: str = PROCESSED_DATA_PATH,
         batch_size: int = 32,
-        val_split: float = 0.2,
+        val_split: float = 0.1,
+        test_split: float = 0.1,
         num_workers: int = 4,
     ):
         self.data_path = data_path
@@ -72,18 +74,26 @@ class AudioDataLoader(IDataLoader):
         np.random.shuffle(sample_keys)
 
         val_size = int(val_split * len(sample_keys))
-        train_keys = sample_keys[val_size:]
-        val_keys = sample_keys[:val_size]
+        test_size = int(test_split * len(sample_keys))
 
-        # Create file lists for train and val
+        val_keys = sample_keys[:val_size]
+        test_keys = sample_keys[val_size : val_size + test_size]
+        train_keys = sample_keys[val_size + test_size :]
+
+        # Create file lists for train, val, and test
         train_files = [f for key in train_keys for f in samples[key]]
         val_files = [f for key in val_keys for f in samples[key]]
+        test_files = [f for key in test_keys for f in samples[key]]
 
         self.train_dataset = AudioDataset(files=train_files)
         self.val_dataset = AudioDataset(files=val_files)
+        self.test_dataset = AudioDataset(files=test_files)
 
     def load_train_data(self) -> Any:
         return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers)
 
     def load_val_data(self) -> Any:
         return DataLoader(self.val_dataset, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers)
+
+    def load_test_data(self) -> Any:
+        return DataLoader(self.test_dataset, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers)

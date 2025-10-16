@@ -136,7 +136,7 @@ class ASNet(nn.Module):
         separated_features = self.separation(encoded_features)
 
         masks = self.mask_estimation(separated_features)
-        masks = nn.functional.softmax(masks, dim=1)
+        masks = nn.functional.sigmoid(masks)
 
         num_channels = self.config.decoder.in_channels
         mask_source1 = masks[:, :num_channels, :]
