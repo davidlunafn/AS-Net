@@ -50,7 +50,8 @@ class TCNBlock(nn.Module):
     ):
         super().__init__()
         self.conv1 = nn.Conv1d(in_channels, out_channels, kernel_size=1)
-        self.norm1 = nn.BatchNorm1d(out_channels)
+        # Use LayerNorm instead of BatchNorm for better generalization with small batch sizes
+        self.norm1 = nn.GroupNorm(1, out_channels)  # GroupNorm with 1 group = LayerNorm
         self.prelu1 = nn.PReLU()
         self.dropout1 = nn.Dropout(dropout_rate)
         self.dconv = nn.Conv1d(
@@ -61,7 +62,7 @@ class TCNBlock(nn.Module):
             groups=out_channels,
             padding=(dilation * (kernel_size - 1)) // 2,
         )
-        self.norm2 = nn.BatchNorm1d(out_channels)
+        self.norm2 = nn.GroupNorm(1, out_channels)  # GroupNorm with 1 group = LayerNorm
         self.prelu2 = nn.PReLU()
         self.dropout2 = nn.Dropout(dropout_rate)
         self.conv2 = nn.Conv1d(out_channels, in_channels, kernel_size=1)

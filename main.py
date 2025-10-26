@@ -28,10 +28,45 @@ from as_net.logger import logger
 
 def generate_data(args):
     """Generates the dataset."""
+    with open(args.config, "r") as f:
+        config_dict = yaml.safe_load(f)
+
+    data_gen_config = config_dict.get("data_generation", {}).get("synthetic", {})
+
+    num_samples = args.num_samples if args.num_samples is not None else data_gen_config.get("num_samples", 100)
+    snr_levels = args.snr_levels if args.snr_levels is not None else data_gen_config.get("snr_levels", [-15, -10, -5, 0, 5, 10, 15])
+    output_path = args.output_path if args.output_path is not None else data_gen_config.get("output_path", "data/processed")
+
     mixing_service = MixingService()
     data_generation_service = DataGenerationService(mixing_service)
     data_generation_service.generate(
-        num_samples=args.num_samples, snr_levels=args.snr_levels, output_path=args.output_path
+        num_samples=num_samples, snr_levels=snr_levels, output_path=output_path
+    )
+
+
+def generate_rain_data(args):
+    """Generates the test dataset with real rain noise."""
+    with open(args.config, "r") as f:
+        config_dict = yaml.safe_load(f)
+
+    data_gen_config = config_dict.get("data_generation", {}).get("test_rain", {})
+
+    bird_calls_dir = args.bird_calls_dir if args.bird_calls_dir is not None else data_gen_config.get("bird_calls_dir")
+    rain_audio_dir = args.rain_audio_dir if args.rain_audio_dir is not None else data_gen_config.get("rain_audio_dir")
+    output_dir = args.output_dir if args.output_dir is not None else data_gen_config.get("output_dir")
+    target_sr = args.target_sr if args.target_sr is not None else data_gen_config.get("target_sr", 22050)
+    num_samples = args.num_samples if args.num_samples is not None else data_gen_config.get("num_samples", 100)
+    snr_levels = args.snr_levels if args.snr_levels is not None else data_gen_config.get("snr_levels", [-15, -10, -5, 0, 5, 10, 15])
+
+    mixing_service = MixingService()
+    data_generation_service = DataGenerationService(mixing_service)
+    data_generation_service.generate_with_real_noise(
+        bird_calls_dir=bird_calls_dir,
+        noise_dir=rain_audio_dir,
+        output_path=output_dir,
+        target_sr=target_sr,
+        num_samples=num_samples,
+        snr_levels=snr_levels,
     )
 
 
@@ -57,6 +92,11 @@ def train_model(args):
         args.validation_steps
         if args.validation_steps is not None
         else train_config.get("validation_steps")
+    )
+    early_stopping_patience = (
+        args.early_stopping_patience
+        if args.early_stopping_patience is not None
+        else train_config.get("early_stopping_patience")
     )
 
     if args.dropout_rate is not None:
@@ -103,6 +143,7 @@ def train_model(args):
         accumulation_steps=accumulation_steps,
         steps_per_epoch=steps_per_epoch,
         validation_steps=validation_steps,
+        early_stopping_patience=early_stopping_patience,
     )
 
 
@@ -161,10 +202,22 @@ def main():
 
     # Generate command
     generate_parser = subparsers.add_parser("generate", help="Generate the dataset.")
-    generate_parser.add_argument("--num-samples", type=int, default=100, help="Number of samples to generate.")
-    generate_parser.add_argument("--snr-levels", type=int, nargs="+", default=[-5, 0, 5, 10, 15], help="SNR levels to use.")
-    generate_parser.add_argument("--output-path", type=str, default="data/processed", help="Path to save the generated data.")
+    generate_parser.add_argument("--num-samples", type=int, help="Number of samples to generate.")
+    generate_parser.add_argument("--snr-levels", type=int, nargs="+", help="SNR levels to use.")
+    generate_parser.add_argument("--output-path", type=str, help="Path to save the generated data.")
+    generate_parser.add_argument("--config", type=str, default="config.yaml", help="Path to the configuration file.")
     generate_parser.set_defaults(func=generate_data)
+
+    # Generate rain test data command
+    generate_rain_parser = subparsers.add_parser("generate-rain-test", help="Generate the test dataset with real rain noise.")
+    generate_rain_parser.add_argument("--bird-calls-dir", type=str, help="Directory with the clean bird vocalizations.")
+    generate_rain_parser.add_argument("--rain-audio-dir", type=str, help="Directory with the rain recordings.")
+    generate_rain_parser.add_argument("--output-dir", type=str, help="Directory to save the generated dataset.")
+    generate_rain_parser.add_argument("--target-sr", type=int, help="Target sample rate.")
+    generate_rain_parser.add_argument("--num-samples", type=int, help="Number of samples to generate.")
+    generate_rain_parser.add_argument("--snr-levels", type=int, nargs="+", help="SNR levels to use.")
+    generate_rain_parser.add_argument("--config", type=str, default="config.yaml", help="Path to the configuration file.")
+    generate_rain_parser.set_defaults(func=generate_rain_data)
 
     # Train command
     train_parser = subparsers.add_parser("train", help="Train the model.")
@@ -177,6 +230,7 @@ def main():
     train_parser.add_argument("--config", type=str, default="config.yaml", help="Path to the model configuration file.")
     train_parser.add_argument("--dropout-rate", type=float, default=None, help="Dropout rate for regularization (overrides config file).")
     train_parser.add_argument("--validation-steps", type=int, default=None, help="Number of steps for validation (overrides config).")
+    train_parser.add_argument("--early-stopping-patience", type=int, default=None, help="Number of epochs to wait before early stopping (overrides config).")
     train_parser.set_defaults(func=train_model)
 
     # Evaluate command

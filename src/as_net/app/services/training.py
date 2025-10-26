@@ -74,6 +74,7 @@ class TrainingService:
         accumulation_steps: int = 1,
         steps_per_epoch: int = None,
         validation_steps: int = None,
+        early_stopping_patience: int = None,
     ):
         """Trains the model."""
 
@@ -84,11 +85,17 @@ class TrainingService:
             logger.info(f"Running for {steps_per_epoch} steps per epoch.")
         if validation_steps is not None:
             logger.info(f"Running for {validation_steps} steps for validation.")
+        if early_stopping_patience is not None:
+            logger.info(f"Using early stopping with patience {early_stopping_patience} epochs.")
 
         train_loader = self.data_loader.load_train_data()
         val_loader = self.data_loader.load_val_data()
 
         model.to(device)
+
+        # Early stopping variables
+        best_val_loss = float('inf')
+        epochs_without_improvement = 0
 
         for epoch in range(num_epochs):
             # Training loop
@@ -102,8 +109,8 @@ class TrainingService:
                     if steps_per_epoch is not None and i >= steps_per_epoch:
                         break
 
-                    # Assuming batch is a tuple of (mixture, source1, source2)
-                    mixture, source1, source2 = batch
+                    # Batch is a tuple of (mixture, source, noise, filepath)
+                    mixture, source1, source2, _ = batch
                     mixture, source1, source2 = (
                         mixture.to(device),
                         source1.to(device),
@@ -149,7 +156,7 @@ class TrainingService:
                         if validation_steps is not None and i >= validation_steps:
                             break
 
-                        mixture, source1, source2 = batch
+                        mixture, source1, source2, _ = batch
                         mixture, source1, source2 = (
                             mixture.to(device),
                             source1.to(device),
@@ -182,5 +189,20 @@ class TrainingService:
             # Save checkpoint and history
             self.checkpoint_saver.save_checkpoint(model, optimizer, epoch, avg_val_loss, config)
             self.history_saver.save_epoch(epoch, avg_train_loss, avg_val_loss)
+
+            # Early stopping check
+            if early_stopping_patience is not None:
+                if avg_val_loss < best_val_loss:
+                    best_val_loss = avg_val_loss
+                    epochs_without_improvement = 0
+                    logger.info(f"Validation loss improved to {best_val_loss:.4f}. Resetting patience counter.")
+                else:
+                    epochs_without_improvement += 1
+                    logger.info(f"No improvement in validation loss. Patience: {epochs_without_improvement}/{early_stopping_patience}")
+
+                    if epochs_without_improvement >= early_stopping_patience:
+                        logger.info(f"Early stopping triggered after {epoch + 1} epochs.")
+                        logger.info(f"Best validation loss: {best_val_loss:.4f}")
+                        break
 
         logger.info("Training finished.")

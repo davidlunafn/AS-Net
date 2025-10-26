@@ -10,14 +10,29 @@ decoder:
 
 separation:
   num_blocks: 8
-  dropout_rate: 0.2
+  dropout_rate: 0.35 # Increased from 0.2 to reduce overfitting
 
 training:
   epochs: 50
-  batch_size: 1
+  batch_size: 1 # Optimized for M1 MacBook Pro memory constraints
   learning_rate: 0.0001
-  accumulation_steps: 2
+  accumulation_steps: 4 # Increased to simulate larger batch size (effective batch = 4)
   num_workers: 1
   steps_per_epoch: 2000
-  validation_steps: 500
+  validation_steps: 1000 # Increased from 500 for more robust validation
+  early_stopping_patience: 10 # Stop if no improvement after 10 epochs
+  weight_decay: 1e-4 # L2 regularization
+
+data_generation:
+  synthetic:
+    num_samples: 100
+    snr_levels: [-15, -10, -5, 0, 5, 10, 15]
+    output_path: "data/processed"
+  test_rain:
+    bird_calls_dir: "/Volumes/SSD\ DL/osfstorage-archive/data/songs/WAV"
+    rain_audio_dir: "/Users/davidluna/Library/CloudStorage/GoogleDrive-davidluna.fn@gmail.com/My\ Drive/Datasets/rain-benckmark/high_rain"
+    output_dir: "/Volumes/SSD\ DL/osfstorage-archive/data/mixed_real_data"
+    target_sr: 22050
+    num_samples: 300
+    snr_levels: [-15, -10, -5, 0, 5, 10, 15]
 
