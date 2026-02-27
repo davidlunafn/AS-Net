@@ -9,6 +9,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "src"))
 
 from as_net.app.services.data_generation import DataGenerationService
 from as_net.app.services.evaluation import EvaluationService
+from as_net.app.services.rain_evaluation import RainEvaluationService
 from as_net.app.services.plotting import PlottingService
 from as_net.domain.services.mixing import MixingService
 from as_net.app.services.model_creation import ModelCreationService
@@ -176,14 +177,51 @@ def evaluate_model(args):
     )
 
 
+def evaluate_rain_model(args):
+    """Evaluates the model on the real rain test set."""
+    with open(args.config, "r") as f:
+        config = yaml.safe_load(f)
+
+    if torch.cuda.is_available():
+        device = "cuda"
+    elif torch.backends.mps.is_available():
+        device = "mps"
+    else:
+        device = "cpu"
+    logger.info(f"Using device: {device.upper()}")
+    config["device"] = device
+
+    # Load checkpoint
+    logger.info(f"Loading checkpoint from {args.checkpoint}")
+    checkpoint = torch.load(args.checkpoint, map_location=device, weights_only=False)
+    model_config = checkpoint["config"]
+
+    # Build and load model state
+    model_builder = ASNetTorchBuilder()
+    model = model_builder.build(model_config)
+    model.load_state_dict(checkpoint["model_state_dict"])
+    logger.info("Model loaded successfully.")
+
+    # Determine save path
+    save_audio_path = args.save_audio_path if args.save_audio_path is not None else config.get("evaluation", {}).get("save_separated_path")
+
+    # Run evaluation
+    evaluation_service = RainEvaluationService(model=model, config=config)
+    evaluation_service.evaluate(output_csv_path=args.output, save_audio_path=save_audio_path)
+
+
 def plot_results(args):
     """Plots various results."""
-    plotting_service = PlottingService()
+    with open(args.config, "r") as f:
+        config_dict = yaml.safe_load(f)
+    plotting_service = PlottingService(config=config_dict)
     if args.type == "all":
         logger.info("Generating all summary plots...")
         plotting_service.plot_learning_curves(args.history_file)
         plotting_service.plot_sdr_improvement(args.results_file)
         plotting_service.plot_evaluation_distribution(args.results_file)
+        plotting_service.plot_sdr_sir_improvement(args.results_file)
+        plotting_service.plot_f1_scores(args.results_file)
         logger.info("Finished generating all summary plots.")
     elif args.type == "learning-curves":
         plotting_service.plot_learning_curves(args.history_file)
@@ -191,6 +229,12 @@ def plot_results(args):
         plotting_service.plot_sdr_improvement(args.results_file)
     elif args.type == "eval-distribution":
         plotting_service.plot_evaluation_distribution(args.results_file)
+    elif args.type == "sdr-sir-improvement":
+        plotting_service.plot_sdr_sir_improvement(args.results_file)
+    elif args.type == "f1-scores":
+        plotting_service.plot_f1_scores(args.results_file)
+    elif args.type == "spectrogram-grid":
+        plotting_service.plot_spectrogram_grid(args.results_file)
     elif args.type == "error-spectrogram":
         plotting_service.plot_error_spectrogram(args.clean_file, args.separated_file)
 
@@ -243,6 +287,14 @@ def main():
     evaluate_parser.add_argument("--save-audio-path", type=str, default="data/separated_audio/", help="Path to save separated audio files for analysis.")
     evaluate_parser.set_defaults(func=evaluate_model)
 
+    # Evaluate-rain command
+    evaluate_rain_parser = subparsers.add_parser("evaluate-rain", help="Evaluate the model on the real rain test set.")
+    evaluate_rain_parser.add_argument("--checkpoint", type=str, required=True, help="Path to the model checkpoint to evaluate.")
+    evaluate_rain_parser.add_argument("--config", type=str, default="config.yaml", help="Path to the configuration file.")
+    evaluate_rain_parser.add_argument("--output", type=str, default="results/rain_evaluation.csv", help="Path to save the evaluation results CSV.")
+    evaluate_rain_parser.add_argument("--save-audio-path", type=str, default=None, help="Path to save separated audio files (overrides config).")
+    evaluate_rain_parser.set_defaults(func=evaluate_rain_model)
+
     # Plot command
     plot_parser = subparsers.add_parser("plot", help="Generate plots for the paper.")
     plot_subparsers = plot_parser.add_subparsers(dest="type", required=True)
@@ -250,21 +302,43 @@ def main():
     # 'all' subcommand
     all_parser = plot_subparsers.add_parser("all", help="Generate all standard plots at once.")
     all_parser.add_argument("--history-file", type=str, default="models/training_history.csv", help="Path to the training history CSV file.")
-    all_parser.add_argument("--results-file", type=str, default="models/evaluation_results.csv", help="Path to the evaluation results CSV file.")
+    all_parser.add_argument("--results-file", type=str, default="results/rain_evaluation.csv", help="Path to the evaluation results CSV file.")
+    all_parser.add_argument("--config", type=str, default="config.yaml", help="Path to the configuration file.")
     all_parser.set_defaults(func=plot_results)
 
     # Individual plot subcommands
     lc_parser = plot_subparsers.add_parser("learning-curves", help="Plot training and validation learning curves.")
     lc_parser.add_argument("--history-file", type=str, default="models/training_history.csv", help="Path to the training history CSV file.")
+    lc_parser.add_argument("--config", type=str, default="config.yaml", help="Path to the configuration file.")
     lc_parser.set_defaults(func=plot_results)
 
     sdr_parser = plot_subparsers.add_parser("sdr-improvement", help="Plot SI-SDR improvement.")
     sdr_parser.add_argument("--results-file", type=str, default="models/evaluation_results.csv", help="Path to the evaluation results CSV file.")
+    sdr_parser.add_argument("--config", type=str, default="config.yaml", help="Path to the configuration file.")
     sdr_parser.set_defaults(func=plot_results)
 
     ed_parser = plot_subparsers.add_parser("eval-distribution", help="Plot distribution of evaluation metrics.")
     ed_parser.add_argument("--results-file", type=str, default="models/evaluation_results.csv", help="Path to the evaluation results CSV file.")
+    ed_parser.add_argument("--config", type=str, default="config.yaml", help="Path to the configuration file.")
     ed_parser.set_defaults(func=plot_results)
+
+    # SDR/SIR improvement subcommand
+    sdr_sir_parser = plot_subparsers.add_parser("sdr-sir-improvement", help="Plot SDR and SIR improvement.")
+    sdr_sir_parser.add_argument("--results-file", type=str, default="results/rain_evaluation.csv", help="Path to the rain evaluation results CSV file.")
+    sdr_sir_parser.add_argument("--config", type=str, default="config.yaml", help="Path to the configuration file.")
+    sdr_sir_parser.set_defaults(func=plot_results)
+
+    # F1 score subcommand
+    f1_parser = plot_subparsers.add_parser("f1-scores", help="Plot F1 scores for clean, mixed, and separated audio.")
+    f1_parser.add_argument("--results-file", type=str, default="results/rain_evaluation.csv", help="Path to the rain evaluation results CSV file.")
+    f1_parser.add_argument("--config", type=str, default="config.yaml", help="Path to the configuration file.")
+    f1_parser.set_defaults(func=plot_results)
+
+    # Spectrogram grid subcommand
+    spec_grid_parser = plot_subparsers.add_parser("spectrogram-grid", help="Plot a 7x3 grid of spectrograms.")
+    spec_grid_parser.add_argument("--results-file", type=str, default="results/rain_evaluation.csv", help="Path to the rain evaluation results CSV file to determine SNR levels.")
+    spec_grid_parser.add_argument("--config", type=str, default="config.yaml", help="Path to the configuration file.")
+    spec_grid_parser.set_defaults(func=plot_results)
 
     err_parser = plot_subparsers.add_parser("error-spectrogram", help="Plot the spectrogram of the residual error.")
     err_parser.add_argument("--clean-file", type=str, required=True, help="Path to the original clean audio file.")

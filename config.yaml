@@ -1,16 +1,20 @@
-encoder:
-  kernel_size: 16
-  stride: 8
-  out_channels: 128
+audio:
+  sample_rate: 22050
 
-decoder:
-  kernel_size: 16
-  stride: 8
-  in_channels: 128
+model:
+  encoder:
+    kernel_size: 16
+    stride: 8
+    out_channels: 128
 
-separation:
-  num_blocks: 8
-  dropout_rate: 0.35 # Increased from 0.2 to reduce overfitting
+  decoder:
+    kernel_size: 16
+    stride: 8
+    in_channels: 128
+
+  separation:
+    num_blocks: 8
+    dropout_rate: 0.35 # Increased from 0.2 to reduce overfitting
 
 training:
   epochs: 50
@@ -36,3 +40,9 @@ data_generation:
     num_samples: 300
     snr_levels: [-15, -10, -5, 0, 5, 10, 15]
 
+evaluation:
+  rain_test_dir: "/Volumes/SSD DL/osfstorage-archive/data/mixed_real_data/test_rain"
+  functional:
+    target_species: "Great Tit"
+    confidence_threshold: 0.5
+  save_separated_path: "/Volumes/SSD\ DL/AS-Net/data/rain_evaluate"
